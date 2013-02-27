@@ -4,10 +4,12 @@ oracle-oci-helper
 PHP helper classes for Oracle OCI connections
 
 This script provides the OracleConnection class, which aims 
-to help run SQL queries and manipulates Oracle tables as 
+to help run SQL queries and manipulate Oracle tables as 
 PHP objects.
 
 Example:
+    
+    <?php
     require "oracle-oci-helper.php";
     
     $oracle_config = array(
