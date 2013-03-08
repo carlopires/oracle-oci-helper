@@ -355,6 +355,18 @@ class OracleConnection {
 		} else
 			return array();
 	}
+	
+	/*
+	 * Fetch only one row and returns it. Raise an
+	 * exception if there is more than one row.
+	 */
+	public function object($tablename = null) {
+		$rows = $this->objects($tablename);
+		if (count($rows) == 1)
+			return $rows[0];
+		else
+			throw new Exception('It is expected only one object');
+	}
 
 	/*
 	 * Fetch the error code related to last executed query.
