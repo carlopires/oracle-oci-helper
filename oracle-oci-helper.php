@@ -169,7 +169,7 @@ class OracleConnection {
 	private $debug_handle = null;
 
 	public $connection = null;
-	private $autocommit = true;
+	public $autocommit = true;
 	private $last_inserted_id;
 
 	private $statement;
@@ -388,6 +388,20 @@ class OracleConnection {
 			return $error['message'];
 		else
 			return null;
+	}
+	
+	/*
+	 * Commit changes pending in the oracle connection
+	*/
+	public function commit() {
+		return oci_commit($this->connection);
+	}
+	
+	/*
+	 * Rollback changes pending in the oracle connection
+	*/
+	public function rollback() {
+		return oci_rollback($this->connection);
 	}
 }
 

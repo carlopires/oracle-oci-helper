@@ -42,3 +42,10 @@ Example:
     $ob->update();
     
     $objects[1]->delete();
+
+    // using transactions
+    
+    $ob->autocommit = false;
+    ... after changes
+    $ob->commit() // or $ob->rollback();
+
