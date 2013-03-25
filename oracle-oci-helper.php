@@ -68,7 +68,7 @@ class OracleObject {
 	}
 
 	public function __get($name) {
-		if (isset($this->updated[$name]))
+		if (array_key_exists($name, $this->updated))
 			return $this->updated[$name];
 		
 		$npos = array_search($name, $this->metadata->column_names);
@@ -117,13 +117,17 @@ class OracleObject {
 		$params = array();
 		$first_field = true;
 		
-		foreach($this->metadata->column_names as $n => $fieldname) {
-			$param_name = strtolower($fieldname);
-			$params[$param_name] = $this->parse_value($fieldname, $this->{$fieldname});
-			
+		foreach($this->metadata->column_names as $n => $fieldname) {			
 			if ($fieldname == 'ID')
 				continue;
+			
+			else if (!array_key_exists($fieldname, $this->updated))
+				continue;
+			
 			else {
+				$param_name = strtolower($fieldname);
+				$params[$param_name] = $this->parse_value($fieldname, $this->updated[$fieldname]);
+
 				if (!$first_field)
 					$sql .= ", ";
 				else
@@ -134,6 +138,8 @@ class OracleObject {
 		}
 		
 		$sql .= "WHERE ID=:id";
+		$params['id'] = $this->ID;
+		
 		$this->db->query($sql, $params);
 	}
 	
@@ -256,7 +262,7 @@ class OracleConnection {
 			$is_insert = preg_match('/^insert/i', $sql);
 	
 			if ($is_insert)
-				$sql .= ' RETURN ID INTO :NEW_ID';
+				$sql .= ' RETURNING ID INTO :new_id';
 			
 			$this->debug($sql);
 			$this->statement = oci_parse($this->connection, $sql);
@@ -277,7 +283,7 @@ class OracleConnection {
 			}
 	
 			if ($is_insert)
-				oci_bind_by_name($this->statement, ':NEW_ID', $this->last_inserted_id, 20, SQLT_INT);
+				oci_bind_by_name($this->statement, ':new_id', $this->last_inserted_id, 20, SQLT_INT);
 				
 			if ($this->is_debugging) {
 				if (!$this->autocommit)
