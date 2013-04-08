@@ -168,7 +168,9 @@ class OracleConnection {
 
 	private $ORACLE_NLS_DATE_FORMAT = "DD/MM/YYYY";
 	private $ORACLE_NLS_TIMESTAMP_FORMAT = "DD/MM/YYYY HH24:MI:SS";
-	private $ORACLE_NLS_LANG = "PORTUGUESE_BRAZIL.WE8ISO8859P1";
+	private $ORACLE_NLS_LANGUAGE = 'BRAZILIAN PORTUGUESE';
+	private $ORACLE_NLS_TERRITORY = 'BRAZIL';
+	private $ORACLE_NLS_CHARACTERSET = 'WE8ISO8859P1';
 
 	private $is_debugging;
 	private $is_connected;
@@ -202,8 +204,14 @@ class OracleConnection {
 		if (isset($config['ORACLE_NLS_TIMESTAMP_FORMAT']))
 			$this->ORACLE_NLS_TIMESTAMP_FORMAT = $config['ORACLE_NLS_TIMESTAMP_FORMAT'];
 		
-		if (isset($config['ORACLE_NLS_LANG']))
-			$this->ORACLE_NLS_LANG = $config['ORACLE_NLS_LANG'];
+		if (isset($config['ORACLE_NLS_LANGUAGE']))
+			$this->ORACLE_NLS_LANGUAGE = $config['ORACLE_NLS_LANGUAGE'];
+
+		if (isset($config['ORACLE_NLS_TERRITORY']))
+			$this->ORACLE_NLS_TERRITORY = $config['ORACLE_NLS_TERRITORY'];
+		
+		if (isset($config['ORACLE_NLS_CHARACTERSET']))
+			$this->ORACLE_NLS_CHARACTERSET = $config['ORACLE_NLS_CHARACTERSET'];
 		
 		$this->is_debugging = $debug;
 		$this->is_connected = false;
@@ -237,16 +245,18 @@ class OracleConnection {
 				(ADDRESS = (PROTOCOL = TCP)(HOST = $this->ORACLE_HOST)(PORT = $this->ORACLE_PORT))
 				(CONNECT_DATA = (SID = $this->ORACLE_SID)) )";
 				
-			$this->connection = oci_connect($this->ORACLE_USER, $this->ORACLE_PASSWORD, $ORACLE_DSN, 'utf8');
+			$this->connection = oci_connect($this->ORACLE_USER, $this->ORACLE_PASSWORD, $ORACLE_DSN, $this->ORACLE_NLS_CHARACTERSET);
 				
 			if (!$this->connection) {
-				$e = oci_error();
-				print_r($e);
+				//$e = oci_error();
+				//print_r($e);
 				$this->is_connected = false;
 			} else {
 				$s1 = oci_parse($this->connection, "alter session set nls_date_format='$this->ORACLE_NLS_DATE_FORMAT'");
 				$s2 = oci_parse($this->connection, "alter session set nls_timestamp_format='$this->ORACLE_NLS_TIMESTAMP_FORMAT'");
-				$this->is_connected = oci_execute($s1) && oci_execute($s2);
+				$s3 = oci_parse($this->connection, "alter session set nls_language='$this->ORACLE_NLS_LANGUAGE'");
+				$s4 = oci_parse($this->connection, "alter session set nls_territory='$this->ORACLE_NLS_TERRITORY'");
+				$this->is_connected = oci_execute($s1) && oci_execute($s2) && oci_execute($s3) && oci_execute($s4);
 			}
 		}
 	}
