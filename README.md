@@ -7,6 +7,9 @@ This script provides the OracleConnection class, which aims
 to help run SQL queries and manipulate Oracle tables as 
 PHP objects.
 
+OBS: This class requires that all tables have an ID field
+as primary key.
+
 Example:
     
     <?php

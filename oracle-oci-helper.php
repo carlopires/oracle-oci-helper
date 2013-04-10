@@ -384,6 +384,19 @@ class OracleConnection {
 			throw new Exception('It is expected only one object');
 	}
 
+	public function drop_table_if_exists($tablename) {
+		$this->query("
+				begin
+					execute immediate 'DROP TABLE $tablename';
+				exception
+					when others then
+						if SQLCODE != -942 then
+							raise;
+						end if;
+				end;
+		");
+	}
+	
 	/*
 	 * Fetch the error code related to last executed query.
 	*/
@@ -418,6 +431,16 @@ class OracleConnection {
 	*/
 	public function rollback() {
 		return oci_rollback($this->connection);
+	}
+	
+	/*
+	 * Closes the oracle connection
+	*/
+	public function close() {
+		$result = oci_close($this->connection);
+		$this->is_connected = false;
+		$this->connection = null;
+		return $result;
 	}
 }
 
