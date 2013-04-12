@@ -248,15 +248,19 @@ class OracleConnection {
 			$this->connection = oci_connect($this->ORACLE_USER, $this->ORACLE_PASSWORD, $ORACLE_DSN, $this->ORACLE_NLS_CHARACTERSET);
 				
 			if (!$this->connection) {
-				//$e = oci_error();
-				//print_r($e);
 				$this->is_connected = false;
 			} else {
-				$s1 = oci_parse($this->connection, "alter session set nls_date_format='$this->ORACLE_NLS_DATE_FORMAT'");
-				$s2 = oci_parse($this->connection, "alter session set nls_timestamp_format='$this->ORACLE_NLS_TIMESTAMP_FORMAT'");
-				$s3 = oci_parse($this->connection, "alter session set nls_language='$this->ORACLE_NLS_LANGUAGE'");
-				$s4 = oci_parse($this->connection, "alter session set nls_territory='$this->ORACLE_NLS_TERRITORY'");
-				$this->is_connected = oci_execute($s1) && oci_execute($s2) && oci_execute($s3) && oci_execute($s4);
+				$conn = $this->connection;
+				
+				oci_execute(oci_parse($conn, "alter session set nls_language='$this->ORACLE_NLS_LANGUAGE'"));
+				oci_execute(oci_parse($conn, "alter session set nls_territory='$this->ORACLE_NLS_TERRITORY'"));
+				oci_execute(oci_parse($conn, "alter session set nls_date_format='$this->ORACLE_NLS_DATE_FORMAT'"));
+				oci_execute(oci_parse($conn, "alter session set nls_timestamp_format='$this->ORACLE_NLS_TIMESTAMP_FORMAT'"));
+				
+				$this->is_connected = true;
+				
+				//foreach($this->query('select * from v$nls_parameters')->objects() as $p)
+				//	print "$p->PARAMETER => $p->VALUE\n";
 			}
 		}
 	}
