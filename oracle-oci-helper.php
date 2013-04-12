@@ -233,7 +233,7 @@ class OracleConnection {
 	}
 
 	/*
-	 * Initializes Oracle connection.
+	* Initializes Oracle connection.
 	*/
 	public function connect($force = false) {
 		if ($force)
@@ -259,14 +259,28 @@ class OracleConnection {
 				
 				$this->is_connected = true;
 				
-				//foreach($this->query('select * from v$nls_parameters')->objects() as $p)
-				//	print "$p->PARAMETER => $p->VALUE\n";
 			}
 		}
 	}
+	
+	/*
+	* Returns oracle session parameters
+	*/	
+	public function session_parameters() {
+		$this->connect();
+
+		if ($this->connected) {
+			$params = array();
+			foreach($this->query('select * from v$nls_parameters')->objects() as $p)
+				$params[$p->PARAMETER] = $p->VALUE;
+			
+			return $params;
+		} else
+			throw new Exception('Could not connect to oracle database');
+	}
 
 	/*
-	 * Run a SQL query.
+	* Run a SQL query.
 	*/
 	public function query($sql, $params = null) {
 		$this->connect();
@@ -328,8 +342,8 @@ class OracleConnection {
 	}
 
 	/*
-	 * Returns an array with the rows returned by the last query
-	 * executed.
+	* Returns an array with the rows returned by the last query
+	* executed.
 	*/
 	public function rows() {
 		$rows = array();
@@ -338,7 +352,7 @@ class OracleConnection {
 	}
 
 	/*
-	 * Relates each row returned by a query with a PHP object. 
+	* Relates each row returned by a query with a PHP object. 
 	*/
 	public function objects($tablename = null) {
 		$this->num_rows = oci_num_rows($this->statement);
@@ -377,9 +391,9 @@ class OracleConnection {
 	}
 	
 	/*
-	 * Fetch only one row and returns it. Raise an
-	 * exception if there is more than one row.
-	 */
+	* Fetch only one row and returns it. Raise an
+	* exception if there is more than one row.
+	*/
 	public function object($tablename = null) {
 		$rows = $this->objects($tablename);
 		if (count($rows) == 1)
@@ -402,7 +416,7 @@ class OracleConnection {
 	}
 	
 	/*
-	 * Fetch the error code related to last executed query.
+	* Fetch the error code related to last executed query.
 	*/
 	public function error_num() {
 		$error = oci_error($this->statement);
@@ -413,7 +427,7 @@ class OracleConnection {
 	}
 
 	/*
-	 * Fetch the error message related to last executed query. 
+	* Fetch the error message related to last executed query. 
 	*/
 	public function error_msg() {
 		$error = oci_error($this->statement);
@@ -424,21 +438,21 @@ class OracleConnection {
 	}
 	
 	/*
-	 * Commit changes pending in the oracle connection
+	* Commit changes pending in the oracle connection
 	*/
 	public function commit() {
 		return oci_commit($this->connection);
 	}
 	
 	/*
-	 * Rollback changes pending in the oracle connection
+	* Rollback changes pending in the oracle connection
 	*/
 	public function rollback() {
 		return oci_rollback($this->connection);
 	}
 	
 	/*
-	 * Closes the oracle connection
+	* Closes the oracle connection
 	*/
 	public function close() {
 		$result = oci_close($this->connection);
