@@ -54,6 +54,10 @@ class OracleMetadata {
 }
 
 class OracleObject {
+	const CSV_DELIMITER = ',';
+	const CSV_ENCLOSURE = '"';
+	const CSV_LINEFEED = "\r\n";
+	
 	public $db;
 	public $metadata;
 	public $row_num;
@@ -82,11 +86,20 @@ class OracleObject {
 	public function __set($name, $value) {
 		$this->updated[$name] = $value;		
 	}
-	 
+	
+	public function has_fieldname($name) {
+		return array_search($name, $this->metadata->column_names) !== false;
+	}
+
+	public function nvl($name, $default_value) {
+		$value = $this->has_fieldname($name) ? $this->{$name} : null;
+		return is_null($value) ? $default_value : $value;
+	}
+	
 	public function row() {
 		return $this->metadata->rows[$this->row_num];
 	}
-	 
+
 	public function object() {
 		$obj = new stdClass();
 		foreach($this->metadata->column_names as $n => $fieldname)
@@ -94,6 +107,50 @@ class OracleObject {
 		return $obj;
 	}
 
+	/*
+	* Return a value enclosed as CSV data 
+	*/
+	private function csv_enclosed_value($value = null) {
+		if ($value !== null && $value != '' ) {
+			$csv_delimiter = static::CSV_DELIMITER;
+			$csv_enclosure = static::CSV_ENCLOSURE;
+			
+			$delimiter = preg_quote($csv_delimiter, '/');
+			$enclosure = preg_quote($csv_enclosure, '/');
+			
+			if (preg_match("/".$delimiter."|".$enclosure."|\n|\r/i", $value) || ($value{0} == ' ' || substr($value, -1) == ' ') ) {
+				$value = str_replace($csv_enclosure, $csv_enclosure.$csv_enclosure, $value);
+				$value = $csv_enclosure.$value.$csv_enclosure;
+			}
+		}
+		return $value;
+	}
+	
+	/*
+	* Returns this record encoded as CSV data
+	*/
+	public function csv() {
+		foreach($this->metadata->column_names as $n => $fieldname) {
+			$value = $this->{$fieldname};
+			$entry[] = $this->csv_enclosed_value($value);
+		}
+		return implode(static::CSV_DELIMITER, $entry).static::CSV_LINEFEED;
+	}
+
+	/*
+	* Returns field names of this record encoded 
+	* as CSV header
+	*/
+	public function csv_header() {
+		foreach($this->metadata->column_names as $n => $fieldname) {
+			$entry[] = $this->csv_enclosed_value($fieldname);
+		}
+		return implode(static::CSV_DELIMITER, $entry).static::CSV_LINEFEED;
+	}
+	
+	/*
+	* Delete this record using ID field and table name, if available 
+	*/
 	public function delete($tablename = null) {
 		$table = is_string($tablename) ? $tablename : $this->metadata->tablename;
 		if (!$table)
@@ -107,6 +164,9 @@ class OracleObject {
 		$this->db->query($sql, $params);
 	}
 	
+	/*
+	* Update this record using ID field and table name, if available 
+	*/
 	public function update($tablename = null) {
 		$table = is_string($tablename) ? $tablename : $this->metadata->tablename;
 		if (!$table)
@@ -402,6 +462,9 @@ class OracleConnection {
 			throw new Exception('It is expected only one object');
 	}
 
+	/*
+	* A helper to drop a table by name if it exists. 
+	*/
 	public function drop_table_if_exists($tablename) {
 		$this->query("
 				begin
@@ -435,6 +498,31 @@ class OracleConnection {
 			return $error['message'];
 		else
 			return null;
+	}
+	
+	/*
+	* Exports this query as CSV file
+	*/
+	public function export($csv_filename) {
+		$csv = fopen($csv_filename, 'w+');
+		if ($csv !== false) {
+			$first = true;
+			$n = 0;
+			
+			foreach($this->objects() as $record) {
+				if ($first) {
+					fwrite($csv, $record->csv_header());
+					$first = false;
+				}
+			
+				fwrite($csv, $record->csv());
+				$n++;
+			}
+			
+			fclose($csv);
+			return $n;
+		}
+		return false;
 	}
 	
 	/*
