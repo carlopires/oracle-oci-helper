@@ -101,8 +101,10 @@ class OracleObject {
 	}
 
 	public function object() {
+		$fieldnames = array_merge(array_values($this->metadata->column_names), array_keys($this->updated));
+		
 		$obj = new stdClass();
-		foreach($this->metadata->column_names as $n => $fieldname)
+		foreach($fieldnames as $fieldname)
 			$obj->{$fieldname} = $this->{$fieldname};
 		return $obj;
 	}
@@ -338,18 +340,41 @@ class OracleConnection {
 		} else
 			throw new Exception('Could not connect to oracle database');
 	}
+	
+	/*
+	* Returns an object that match the parameters
+	*/
+	public function get($table_name, $params) {
+		if (!is_array($params))
+			throw new Exception('Parameters for get() must be an array');
+		
+		$sql = "select * from $table_name where";
+		$sql_params = array();
+		$first = true;
+		
+		foreach($params as $field_name => $field_value) {
+			$param_name = strtolower($field_name);
+			$sql_params[$param_name] = $field_value;
+			
+			if (!$first)
+				$sql .= " AND";
+			
+			$sql .= " $field_name = :$param_name";
+			
+			$first = false;  
+		}
+		return $this->query($sql, $sql_params)->object();
+	}
 
 	/*
 	* Run a SQL query.
 	*/
-	public function query($sql, $params = null) {
+	public function query($sql, $params = null, $output_inserted_id = false) {
 		$this->connect();
 		try {
 			$this->debug("New query:");
 			
-			$is_insert = preg_match('/^insert/i', $sql);
-	
-			if ($is_insert)
+			if ($output_inserted_id)
 				$sql .= ' RETURNING ID INTO :new_id';
 			
 			$this->debug($sql);
@@ -359,6 +384,11 @@ class OracleConnection {
 				$this->debug("Binding parameters:");
 
 				foreach ($params as $key => $value) {
+					// to avoid PHP warning, only bind if this
+					// parameter is in SQL 
+					if (strpos($sql, ":$key") === false)
+						continue;
+					
 					// Creates a variable to the parameter because
 					// the oci_execute() function requires that the
 					// variable used in oci_bind_by_name() exists
@@ -370,7 +400,7 @@ class OracleConnection {
 				}
 			}
 	
-			if ($is_insert)
+			if ($output_inserted_id)
 				oci_bind_by_name($this->statement, ':new_id', $this->last_inserted_id, 20, SQLT_INT);
 				
 			if ($this->is_debugging) {
