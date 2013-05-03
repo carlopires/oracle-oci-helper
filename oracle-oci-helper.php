@@ -649,72 +649,51 @@ class ParserIf {
 		$this->debug = $debug;
 	}
 	
-	function parseelse(&$text, $start = 0) {
+	private function next_endif(&$text, $start) {
+		$end = null;
+		$n = 0;
+		$pos = $start+1;
+		while (true) {
+			$next_if = strpos($text, '{% if ', $pos);
+			$next_endif = strpos($text, '{% endif %}', $pos);
+		
+			if ($next_endif === false)
+				break;
+		
+			if ($next_if !== false && $next_if < $next_endif) {
+				$n++;
+				$pos = $next_if+1;
+			} else {
+				$end = $next_endif;
+					
+				if ($n == 0)
+					break;
+				else {
+					$n--;
+					$pos = $next_endif+1;
+				}
+			}
+		}
+		return $end;
+	}
+	
+	function parse_else(&$text, $start = 0) {
 		$else = strpos($text, '{% else %}', $start);
 		if ($else !== false) {
 			$next_if = strpos($text, '{% if ', $start);
 			if ($next_if !== false && $next_if < $else) {
-				$end = null;
-				$n = 0;
-				$pos = $start+1;
-				while (true) {
-					$next_if = strpos($text, '{% if ', $pos);
-					$next_endif = strpos($text, '{% endif %}', $pos);
-						
-					if ($next_endif === false)
-						break;
-						
-					if ($next_if !== false && $next_if < $next_endif) {
-						$n++;
-						$pos = $next_if+1;
-					} else {
-						$end = $next_endif;
-			
-						if ($n == 0)
-							break;
-						else {
-							$n--;
-							$pos = $next_endif+1;
-						}
-					}
-				}
-				if ($end)
-					return $this->parseelse($text, $end+1);
+				if (($end = $this->next_endif($text, $next_if)) !== false)
+					return $this->parse_else($text, $end+1);
 			} else
 				return $else;
 		}
 		return false;
 	}
 
-	function parseif($text) {
+	function parse_if(&$text) {
 		$start = strpos($text, '{% if ');
 		if ($start !== false) {
-			$end = null;
-			$n = 0;
-			$pos = $start+1;
-			while (true) {
-				$next_if = strpos($text, '{% if ', $pos);
-				$next_endif = strpos($text, '{% endif %}', $pos);
-					
-				if ($next_endif === false)
-					break;
-					
-				if ($next_if !== false && $next_if < $next_endif) {
-					$n++;
-					$pos = $next_if+1;
-				} else {
-					$end = $next_endif;
-
-					if ($n == 0)
-						break;
-					else {
-						$n--;
-						$pos = $next_endif+1;
-					}
-				}
-			}
-
-			if ($end) {
+			if (($end = $this->next_endif($text, $start)) !== false) {
 				// extracts the condition
 				$pos = strpos($text, '%}', $start+1);
 				if ($pos !== false ) {
@@ -724,7 +703,7 @@ class ParserIf {
 
 					$valid = substr($text, $pos+2, $end-$pos-2);
 
-					if (($else = $this->parseelse($valid)) !== false) {
+					if (($else = $this->parse_else($valid)) !== false) {
 						$invalid = substr($valid, $else+10);
 						$valid = substr($valid, 0, $else-1);
 					} else
@@ -767,7 +746,7 @@ class ParserIf {
 			$err_level = error_reporting(0);
 
 		// parse ifs
-		while (is_array($parsed = $this->parseif($text))) {
+		while (is_array($parsed = $this->parse_if($text))) {
 			try {
 				$valid = eval('return ' . $parsed['condition'] . ';');
 			} catch (Exception $e) {
