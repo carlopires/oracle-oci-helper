@@ -293,6 +293,10 @@ class OracleConnection {
 		if ($this->is_debugging)
 			fwrite($this->debug_handle, "$message\n");
 	}
+	
+	public function debugging($message) {
+		return $this->is_debugging;
+	}
 
 	/*
 	* Initializes Oracle connection.
