@@ -511,16 +511,21 @@ class OracleConnection {
 				end;
 		");
 	}
+
+	/*
+	* Fetch the error message related to last executed query.
+	*/
+	public function error() {
+		$error = oci_error($this->statement);
+		return is_array($error) ? $error : null;
+	}
 	
 	/*
 	* Fetch the error code related to last executed query.
 	*/
 	public function error_num() {
-		$error = oci_error($this->statement);
-		if (is_array($error))
-			return $error['code'];
-		else
-			return null;
+		$error = $this->error();
+		return is_array(error) ? $error['code'] : null;
 	}
 
 	/*
@@ -528,10 +533,7 @@ class OracleConnection {
 	*/
 	public function error_msg() {
 		$error = oci_error($this->statement);
-		if (is_array($error))
-			return $error['message'];
-		else
-			return null;
+		return is_array($error) ? $error['message'] : null;
 	}
 	
 	/*
