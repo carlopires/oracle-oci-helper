@@ -188,14 +188,34 @@ class OracleObject {
 			
 			else {
 				$param_name = strtolower($fieldname);
-				$params[$param_name] = $this->parse_value($fieldname, $this->updated[$fieldname]);
+				$param_value = $params[$param_name] = $this->parse_value($fieldname, $this->updated[$fieldname]);
 
 				if (!$first_field)
 					$sql .= ", ";
 				else
 					$first_field = false;
+
+				$fieldtype = $this->metadata->fieldtype($fieldname);
 				
-				$sql .= "\t$fieldname=:$param_name\n";
+				if ($fieldtype == 'DATE' && !is_null($param_value)) {
+					$date_format = $this->db->get_date_format();
+					$timestamp_format = $this->db->get_timestamp_format();
+					
+					$param_size = strlen($param_value);
+					
+					if ($param_size == strlen(preg_replace('/\d/','',$date_format))) 
+						$param_format = $date_format;
+					
+					else if ($param_size == strlen(preg_replace('/\d/','',$timestamp_format)))
+						$param_format = $timestamp_format;
+					else
+						throw new Exception('Invalid date format: '.$param_value);
+					
+					$sql .= "\t$fieldname=to_date(:$param_name,'$param_format')\n";
+					
+				} else {
+					$sql .= "\t$fieldname=:$param_name\n";
+				}
 			}
 		}
 		
@@ -244,7 +264,7 @@ class OracleConnection {
 
 	private $statement;
 
-	public function __construct($config, $debug = false, $debug_filename = '/tmp/oracle-debug.sql') {
+	public function __construct($config, $debug = false, $debug_filename = null) {
 		if (isset($config['ORACLE_HOST']))
 			$this->ORACLE_HOST = $config['ORACLE_HOST'];
 		
@@ -278,8 +298,12 @@ class OracleConnection {
 		$this->is_debugging = $debug;
 		$this->is_connected = false;
 
-		if ($this->is_debugging)
+		if ($this->is_debugging) {
+			if (is_null($debug_filename)) {
+				$debug_filename = '/tmp/oracle-debug-'.date('Y-m-d-H').'.sql';
+			}
 			$this->debug_handle = fopen($debug_filename, "a");
+		}
 
 		$this->connect();
 	}
@@ -346,10 +370,27 @@ class OracleConnection {
 	}
 	
 	/*
+	* Return the date format in use 
+	*/
+	function get_date_format() {
+		return $this->ORACLE_NLS_DATE_FORMAT;
+	}
+
+	/*
+	 * Return the timestamp format in use
+	*/
+	function get_timestamp_format() {
+		return $this->ORACLE_NLS_TIMESTAMP_FORMAT;
+	}
+	
+	/*
 	* Returns an object that match the parameters
 	*/
 	public function get($table_name, $params) {
-		if (!is_array($params))
+		if (is_numeric($params))
+			$params = array('ID' => $params);
+		
+		else if (!is_array($params))
 			throw new Exception('Parameters for get() must be an array');
 		
 		$sql = "select * from $table_name where";
@@ -367,9 +408,45 @@ class OracleConnection {
 			
 			$first = false;  
 		}
-		return $this->query($sql, $sql_params)->object();
+		return $this->query($sql, $sql_params)->object($table_name);
 	}
 
+	/*
+	* Deletes objects that match the parameters
+	*/
+	public function delete($table_name, $params) {
+		if (!is_array($params))
+			throw new Exception('Parameters for delete() must be an array');
+	
+		$sql = "delete from $table_name";
+		$sql_params = array();
+		$first = true;
+	
+		foreach($params as $field_name => $field_value) {
+			$param_name = strtolower($field_name);
+			$sql_params[$param_name] = $field_value;
+				
+			if (!$first)
+				$sql .= " AND";
+			else
+				$sql .= " where";
+				
+			$sql .= " $field_name = :$param_name";
+				
+			$first = false;
+		}
+		return $this->query($sql, $sql_params);
+	}
+	
+	/*
+	* Returns the next sequence ID for the table
+	* sequence passed as parameter.
+	*/
+	public function next_sequence($table_name) {
+		$sql = "select $table_name.NEXTVAL as ID from DUAL";
+		return $this->query($sql)->object()->ID;
+	}
+	
 	/*
 	* Run a SQL query.
 	*/
@@ -483,21 +560,40 @@ class OracleConnection {
 		} else
 			return array();
 	}
-	
+
 	/*
 	* Fetch only one row and returns it. Raise an
 	* exception if there is more than one row.
 	*/
-	public function object($tablename = null) {
+	public function object_or_null($tablename = null) {
 		$rows = $this->objects($tablename);
-		if (count($rows) == 1)
+		$num_rows = count($rows); 
+		if ($num_rows == 1)
 			return $rows[0];
+		
+		else if ($num_rows == 0)
+			return  null;
+		
 		else
-			throw new Exception('It is expected only one object');
+			throw new Exception('It is expected only one object', 404);
 	}
-
+	
 	/*
-	* A helper to drop a table by name if it exists. 
+	* Fetch only one row and returns it. Raise an
+	* exception if there is more than one row or if 
+	* there is none object.
+	*/
+	public function object($tablename = null) {
+		$obj = $this->object_or_null($tablename);
+		if (is_null($obj))
+			throw new Exception('It was expected one object, not null', 404);
+		return $obj;
+	}
+	
+	/*
+	* A helper to drop a table by name if it exists.
+	* 
+	* OBS: DROP TABLE HAVE IMPLICIT COMMIT !!
 	*/
 	public function drop_table_if_exists($tablename) {
 		$this->query("
@@ -508,10 +604,9 @@ class OracleConnection {
 						if SQLCODE != -942 then
 							raise;
 						end if;
-				end;
-		");
+				end;");
 	}
-
+	
 	/*
 	* Fetch the error message related to last executed query.
 	*/
@@ -561,16 +656,22 @@ class OracleConnection {
 		return false;
 	}
 
+	/*
+	* Parses the $sql variable with variables in $vars array.
+	* The parse used supports IF clauses to generate 
+	* conditionals SQL. See bellow the ParseIf class documentation. 
+	*/
 	public static function parse_sql($sql, $vars=null) {
 		if (is_array($vars)) {
 			$p = new ParserIf($vars, false);
 			$sql = $p->parse($sql);
 	
-			foreach($vars as $name => $value)
+			foreach($vars as $name => $value) {
 				if ($name[0] != '$')
 					throw new Exception(sprintf('The variable SQL "%s" must starts with $', $name));
-			else
-				$sql = str_replace($name, $value, $sql);
+				else
+					$sql = str_replace($name, $value, $sql);
+			}
 		}
 		return $sql;
 	}
