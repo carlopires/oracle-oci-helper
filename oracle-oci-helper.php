@@ -178,6 +178,7 @@ class OracleObject {
 		
 		$params = array();
 		$first_field = true;
+		$updated = 0;
 		
 		foreach($this->metadata->column_names as $n => $fieldname) {			
 			if ($fieldname == 'ID')
@@ -188,57 +189,30 @@ class OracleObject {
 			
 			else {
 				$param_name = strtolower($fieldname);
-				$param_value = $params[$param_name] = $this->parse_value($fieldname, $this->updated[$fieldname]);
+				$fieldtype = $this->metadata->fieldtype($fieldname);
+				$param_value = $params[$param_name] = $this->db->parsed_value($fieldname, $fieldtype, $this->updated[$fieldname]);
 
 				if (!$first_field)
-					$sql .= ", ";
-				else
+					$sql .= ",\n\t";
+				else {
+					$sql .= "\t";
 					$first_field = false;
-
-				$fieldtype = $this->metadata->fieldtype($fieldname);
-				
-				if ($fieldtype == 'DATE' && !is_null($param_value)) {
-					$date_format = $this->db->get_date_format();
-					$timestamp_format = $this->db->get_timestamp_format();
-					
-					$param_size = strlen($param_value);
-					
-					if ($param_size == strlen(preg_replace('/\d/','',$date_format))) 
-						$param_format = $date_format;
-					
-					else if ($param_size == strlen(preg_replace('/\d/','',$timestamp_format)))
-						$param_format = $timestamp_format;
-					else
-						throw new Exception('Invalid date format: '.$param_value);
-					
-					$sql .= "\t$fieldname=to_date(:$param_name,'$param_format')\n";
-					
-				} else {
-					$sql .= "\t$fieldname=:$param_name\n";
 				}
+				
+				$sql .= $this->db->sql_field_param($fieldname, $fieldtype, $param_name, $param_value, true);
+				$updated++;
 			}
 		}
 		
-		$sql .= "WHERE ID=:id";
+		if ($updated == 0)
+			throw new Exception("None field to update");
+		
+		$sql .= "\n WHERE\n\tID = :id\n";
+		
 		$params['id'] = $this->ID;
 		
 		$this->db->query($sql, $params);
-	}
-	
-	public function parse_value($fieldname, $value) {
-		$fieldtype = $this->metadata->fieldtype($fieldname);
-		
-		if (strpos($fieldtype, 'NUMBER') !== false) {
-			if (strlen($value) == 0)
-				$value = null;
-			
-		} else if ($fieldtype == 'DATE') {
-			if (strlen($value) == 0)
-				$value = null;
-		}
-
-		return $value;
-	}
+	}	
 }
 
 class OracleConnection {
@@ -254,8 +228,8 @@ class OracleConnection {
 	private $ORACLE_NLS_TERRITORY = 'BRAZIL';
 	private $ORACLE_NLS_CHARACTERSET = 'WE8ISO8859P1';
 
-	private $is_debugging;
-	private $is_connected;
+	private $debugging;
+	private $connected;
 	private $debug_handle = null;
 
 	public $connection = null;
@@ -295,10 +269,10 @@ class OracleConnection {
 		if (isset($config['ORACLE_NLS_CHARACTERSET']))
 			$this->ORACLE_NLS_CHARACTERSET = $config['ORACLE_NLS_CHARACTERSET'];
 		
-		$this->is_debugging = $debug;
-		$this->is_connected = false;
+		$this->debugging = $debug;
+		$this->connected = false;
 
-		if ($this->is_debugging) {
+		if ($this->debugging) {
 			if (is_null($debug_filename)) {
 				$debug_filename = '/tmp/oracle-debug-'.date('Y-m-d-H').'.sql';
 			}
@@ -309,27 +283,31 @@ class OracleConnection {
 	}
 
 	public function __destruct() {
-		if ($this->is_debugging && $this->debug_handle)
+		if ($this->debugging && $this->debug_handle)
 			fclose($this->debug_handle);
 	}
 	
+	public function is_connected() {
+		return $this->connected;
+	}
+	
+	public function is_debugging() {
+		return $this->debugging;
+	}
+
 	public function debug($message) {
-		if ($this->is_debugging)
+		if ($this->debugging)
 			fwrite($this->debug_handle, "$message\n");
 	}
 	
-	public function debugging($message) {
-		return $this->is_debugging;
-	}
-
 	/*
 	* Initializes Oracle connection.
 	*/
 	public function connect($force = false) {
 		if ($force)
-			$this->is_connected = false;
+			$this->connected = false;
 
-		if (!$this->is_connected) {
+		if (!$this->connected) {
 			$ORACLE_DSN = "
 			(DESCRIPTION =
 				(ADDRESS = (PROTOCOL = TCP)(HOST = $this->ORACLE_HOST)(PORT = $this->ORACLE_PORT))
@@ -338,7 +316,7 @@ class OracleConnection {
 			$this->connection = oci_connect($this->ORACLE_USER, $this->ORACLE_PASSWORD, $ORACLE_DSN, $this->ORACLE_NLS_CHARACTERSET);
 				
 			if (!$this->connection) {
-				$this->is_connected = false;
+				$this->connected = false;
 			} else {
 				$conn = $this->connection;
 				
@@ -347,7 +325,7 @@ class OracleConnection {
 				oci_execute(oci_parse($conn, "alter session set nls_date_format='$this->ORACLE_NLS_DATE_FORMAT'"));
 				oci_execute(oci_parse($conn, "alter session set nls_timestamp_format='$this->ORACLE_NLS_TIMESTAMP_FORMAT'"));
 				
-				$this->is_connected = true;
+				$this->connected = true;
 				
 			}
 		}
@@ -446,6 +424,118 @@ class OracleConnection {
 		$sql = "select $table_name.NEXTVAL as ID from DUAL";
 		return $this->query($sql)->object()->ID;
 	}
+
+	/*
+	* Insert a new record
+	*/
+	public function insert($tablename, $param_values) {
+		if (!is_string($tablename) || strlen($tablename) == 0)
+			throw new Exception("Missing table name in insert operation");
+
+		// Fetch the metadata for this table
+		$metadata = $this->query("select * from $tablename where ID = -1")->metadata();
+		
+		$params = array();
+		$fnames = array();
+		
+		foreach($metadata->column_names as $n => $fieldname) {
+			$param_name = strtolower($fieldname);
+			
+			if (!isset($param_values[$param_name]))
+				continue;
+
+			$fieldtype = $metadata->fieldtype($fieldname);
+			$param_values[$param_name] = $param_value = $this->parsed_value($fieldname, $fieldtype, $param_values[$param_name]);
+			
+			$fnames[] = $fieldname;
+			$params[] = $this->sql_field_param($fieldname, $fieldtype, $param_name, $param_value, false);
+		}
+
+		$sql = "INSERT INTO $tablename \n";
+		$sql .= "\t(" . implode(', ', $fnames);
+		$sql .= ")\n VALUES \n\t(" . implode(', ', $params) . ")\n";
+		
+		$this->query($sql, $param_values);
+	}
+
+	/*
+	* Updates a record using the ID field as parameter
+	*/
+	public function update($tablename, $param_values) {
+		if (!is_string($tablename) || strlen($tablename) == 0)
+			throw new Exception("Missing table name in update operation");
+	
+		// Fetch the metadata for this table
+		$metadata = $this->query("select * from $tablename where ID = -1")->metadata();
+	
+		$params = array();
+	
+		foreach($metadata->column_names as $n => $fieldname) {
+			if ($fieldname == 'ID')
+				continue;
+				
+			$param_name = strtolower($fieldname);
+							
+			if (!isset($param_values[$param_name]))
+				continue;
+	
+			$fieldtype = $metadata->fieldtype($fieldname);
+			$param_values[$param_name] = $param_value = $this->parsed_value($fieldname, $fieldtype, $param_values[$param_name]);
+				
+			$params[] = $this->sql_field_param($fieldname, $fieldtype, $param_name, $param_value, true);
+		}
+	
+		$sql = "UPDATE $tablename SET\n";
+		$sql .= "\t" . implode(",\n\t", $params) . "\n";
+		$sql .= "WHERE\n\tID = :id\n";
+		
+		$this->query($sql, $param_values);
+	}
+	
+	/*
+	* Generates a proper SQL string to be used in queries
+	* that need to assign values to fields from parameters.  
+	*/
+	public function sql_field_param(&$fieldname, &$fieldtype, &$param_name, &$param_value, $assign) {
+		$sql = $assign ? "$fieldname = " : '';
+		
+		if ($fieldtype == 'DATE' && !is_null($param_value)) {
+			$date_format = $this->get_date_format();
+			$timestamp_format = $this->get_timestamp_format();
+		
+			$param_size = strlen($param_value);
+		
+			if ($param_size == strlen(preg_replace('/\d/','',$date_format)))
+				$param_format = $date_format;
+			else if ($param_size == strlen(preg_replace('/\d/','',$timestamp_format)))
+				$param_format = $timestamp_format;
+			else
+				throw new Exception('Invalid date format: '.$param_value);
+		
+			$sql .= "to_date(:$param_name,'$param_format')";
+		
+		} else {
+			$sql .= ":$param_name";
+		}
+		return $sql;
+	}
+	
+	/*
+	* Utility function aimed to parse values from 
+	* parameters and make type conversions.
+	*/
+	public function parsed_value($fieldname, $fieldtype, $value) {
+		if (strpos($fieldtype, 'NUMBER') !== false) {
+			if (strlen($value) == 0)
+				$value = null;
+				
+		} else if ($fieldtype == 'DATE') {
+			if (strlen($value) == 0)
+				$value = null;
+		}
+		
+		return $value;
+	}
 	
 	/*
 	* Run a SQL query.
@@ -459,7 +549,12 @@ class OracleConnection {
 				$sql .= ' RETURNING ID INTO :new_id';
 			
 			$this->debug($sql);
+			
 			$this->statement = oci_parse($this->connection, $sql);
+			
+			if ($this->statement === false) {
+				throw new Exception('Could not parse SQL');
+			}
 	
 			if ($params) {
 				$this->debug("Binding parameters:");
@@ -484,24 +579,21 @@ class OracleConnection {
 			if ($output_inserted_id)
 				oci_bind_by_name($this->statement, ':new_id', $this->last_inserted_id, 20, SQLT_INT);
 				
-			if ($this->is_debugging) {
-				if (!$this->autocommit)
-					$result = oci_execute($this->statement, OCI_NO_AUTO_COMMIT);
-				else
-					$result = oci_execute($this->statement, OCI_COMMIT_ON_SUCCESS);					
-			} else {
-				if (!$this->autocommit)
-					$result = @oci_execute($this->statement, OCI_NO_AUTO_COMMIT);
-				else
-					$result = @oci_execute($this->statement, OCI_COMMIT_ON_SUCCESS);
-			}
-				
+			if (!$this->autocommit)
+				$result = @oci_execute($this->statement, OCI_NO_AUTO_COMMIT);
+			else
+				$result = @oci_execute($this->statement, OCI_COMMIT_ON_SUCCESS);
+							
 			if (!$result) {
 				$error = oci_error($this->statement);
 				$err_msg = $error['message'];
 				$err_sql = $error['sqltext'];
 				$err_code = $error['code'];
 				throw new Exception("Query error (1): [$err_code] $err_msg\n$err_sql\n");
+			} else {
+				// Save the number of rows affected during statement execution
+				$this->num_rows = oci_num_rows($this->statement);
+				$this->debug("Affected rows: ".$this->num_rows);
 			}
 			return $this;
 				
@@ -519,46 +611,50 @@ class OracleConnection {
 	public function rows() {
 		$rows = array();
 		oci_fetch_all($this->statement, $rows, 0, -1, OCI_FETCHSTATEMENT_BY_ROW + OCI_NUM);
+		
+		$this->debug("Fetched rows: ".count($rows));
+		
 		return $rows;
 	}
 
 	/*
-	* Relates each row returned by a query with a PHP object. 
+	* Returns the Oracle metadata for the last statement 
+	* executed.
 	*/
-	public function objects($tablename = null) {
-		$this->num_rows = oci_num_rows($this->statement);
-
+	public function metadata($tablename = null) {
 		$ncols = oci_num_fields($this->statement);
-
 		if ($ncols) {
 			$column_names = array();
 			$column_types = array();
 			$column_sizes = array();
-				
+	
 			for ($i = 1; $i <= $ncols; $i++)
 				$column_names[$i] = oci_field_name($this->statement, $i);
-
+	
 			for ($i = 1; $i <= $ncols; $i++)
 				$column_types[$i] = oci_field_type($this->statement, $i);
-
+	
 			for ($i = 1; $i <= $ncols; $i++)
 				$column_sizes[$i] = oci_field_size($this->statement, $i);
-
-			$rows = $this->rows();
-			$metadata = new OracleMetadata($column_names, $column_types,
-					$column_sizes, $rows, $tablename);
-				
-			$objects = array();
-			foreach($rows as $row_num => $value)
-				$objects[$row_num] = new OracleObject($this, $metadata, $row_num);
-
-			$nrows = count($objects);
-			$this->debug("Resultset: $nrows");
-
-			//oci_free_statement($this->statement);
-			return $objects;
+	
+			return new OracleMetadata($column_names, $column_types,
+					$column_sizes, $this->rows(), $tablename);
 		} else
-			return array();
+			throw new Exception('No metadata to fetch');
+	}
+	
+	/*
+	* Relates each row returned by a query with a PHP object. 
+	*/
+	public function objects($tablename = null) {
+		$metadata = $this->metadata($tablename);
+		
+		$objects = array();
+		foreach($metadata->rows as $row_num => $value)
+			$objects[$row_num] = new OracleObject($this, $metadata, $row_num);
+				
+		//oci_free_statement($this->statement);
+		return $objects;
 	}
 
 	/*
@@ -695,7 +791,7 @@ class OracleConnection {
 	*/
 	public function close() {
 		$result = oci_close($this->connection);
-		$this->is_connected = false;
+		$this->connected = false;
 		$this->connection = null;
 		return $result;
 	}
