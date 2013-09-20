@@ -227,6 +227,8 @@ class OracleConnection {
 	private $ORACLE_NLS_LANGUAGE = 'BRAZILIAN PORTUGUESE';
 	private $ORACLE_NLS_TERRITORY = 'BRAZIL';
 	private $ORACLE_NLS_CHARACTERSET = 'WE8ISO8859P1';
+	
+	private $TIMEZONE = 'America/Sao_Paulo';
 
 	private $debugging;
 	private $connected;
@@ -268,10 +270,15 @@ class OracleConnection {
 		
 		if (isset($config['ORACLE_NLS_CHARACTERSET']))
 			$this->ORACLE_NLS_CHARACTERSET = $config['ORACLE_NLS_CHARACTERSET'];
+
+		if (isset($config['TIMEZONE']))
+			$this->TIMEZONE = $config['TIMEZONE'];
+		
+		date_default_timezone_set($this->TIMEZONE);
 		
 		$this->debugging = $debug;
 		$this->connected = false;
-
+		
 		if ($this->debugging) {
 			if (is_null($debug_filename)) {
 				$debug_filename = '/tmp/oracle-debug-'.date('Y-m-d-H').'.sql';
